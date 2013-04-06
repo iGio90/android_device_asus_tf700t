@@ -63,6 +63,9 @@ Usage:  ota_from_target_files [flags] input_target_files output_ota_package
   --override_device <device>
       Override device-specific asserts. Can be a comma-separated list.
 
+  --persist <true|false>
+      Specify whether to enable persistence across installs (on by default).
+
 """
 
 import sys
@@ -102,6 +105,7 @@ OPTIONS.worker_threads = 3
 OPTIONS.backuptool = False
 OPTIONS.modelidcfg = False
 OPTIONS.override_device = 'auto'
+OPTIONS.persist = True
 
 LOCAL_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 DEV_OUT_DIR = os.path.abspath(os.path.join(LOCAL_DIR, '../../../out/target/product/tf700t/'))
@@ -371,6 +375,14 @@ fi
   common.ZipWriteStr(output_zip, "recovery/etc/install-recovery.sh", sh)
   return Item.Get("system/etc/install-recovery.sh", dir=False)
 
+def CopyInstallTools(output_zip):
+  oldcwd = os.getcwd()
+  os.chdir(os.getenv('OUT'))
+  for root, subdirs, files in os.walk("install"):
+    for f in files:
+      p = os.path.join(root, f)
+      output_zip.write(p, p)
+  os.chdir(oldcwd)
 
 def WriteFullOTAPackage(input_zip, output_zip):
   # TODO: how to determine this?  We don't know what version it will
@@ -399,6 +411,11 @@ def WriteFullOTAPackage(input_zip, output_zip):
   AppendAssertions(script, input_zip)
   device_specific.FullOTA_Assertions()
   device_specific.FullOTA_InstallBegin()
+
+  CopyInstallTools(output_zip)
+  script.UnpackPackageDir("install", "/tmp/install")
+  script.SetPermissionsRecursive("/tmp/install", 0, 0, 0755, 0644)
+  script.SetPermissionsRecursive("/tmp/install/bin", 0, 0, 0755, 0755)
 
   if OPTIONS.backuptool:
     script.Mount("/system")
@@ -432,6 +449,9 @@ def WriteFullOTAPackage(input_zip, output_zip):
 
   Item.GetMetadata(input_zip)
   Item.Get("system").SetPermissions(script)
+
+  if OPTIONS.persist:
+    script.RunPersist("restore")
 
   common.ZipWriteStr(output_zip, "boot.blob", blob.data)
   script.ShowProgress(0.2, 0)
@@ -788,6 +808,8 @@ def main(argv):
       OPTIONS.modelidcfg = bool(a.lower() == 'true')
     elif o in ("--override_device"):
       OPTIONS.override_device = a
+    elif o in ("--persist"):
+      OPTIONS.persist = a
     else:
       return False
     return True
@@ -803,6 +825,7 @@ def main(argv):
                                               "worker_threads=",
                                               "aslr_mode=",
                                               "backup=",
+					      "persist=",
                                               "override_device="],
                              extra_option_handler=option_handler)
 
